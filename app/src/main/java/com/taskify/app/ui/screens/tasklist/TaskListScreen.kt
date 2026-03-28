@@ -22,7 +22,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -132,7 +135,7 @@ fun TaskListScreen(
                             onDelete = { viewModel.deleteTask(task) },
                             onClick = { onNavigateToDetail(task.id) },
                             onToggleSubTask = { subTaskId, isCompleted ->
-                                viewModel.toggleSubTaskCompletion(subTaskId, isCompleted)
+                                viewModel.toggleSubTaskCompletion(task.id, subTaskId, isCompleted)
                             },
                             modifier = Modifier.animateItem()
                         )
@@ -262,8 +265,8 @@ private fun SearchInputBar(
     onClose: () -> Unit
 ) {
     val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
 
-    // Small delay so the composable is fully laid out before requesting focus
     LaunchedEffect(Unit) {
         delay(150)
         focusRequester.requestFocus()
@@ -295,7 +298,13 @@ private fun SearchInputBar(
             },
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
+            keyboardOptions = KeyboardOptions(
+                imeAction = ImeAction.Search,
+                capitalization = KeyboardCapitalization.Sentences
+            ),
+            keyboardActions = KeyboardActions(
+                onSearch = { keyboardController?.hide() }
+            )
         )
         TextButton(onClick = onClose) {
             Text("Cancel")

@@ -9,10 +9,15 @@ class ToggleTaskCompletionUseCase @Inject constructor(
 ) {
     suspend operator fun invoke(taskId: String, isCompleted: Boolean) {
         repository.updateCompletionStatus(taskId, isCompleted)
-        // When completing a task, cascade to all subtasks
+        // Cascade completion state to all subtasks in both directions
+        val subtasks = repository.observeTask(taskId).firstOrNull()?.subtasks ?: return
         if (isCompleted) {
-            repository.observeTask(taskId).firstOrNull()?.subtasks?.forEach { sub ->
+            subtasks.forEach { sub ->
                 if (!sub.isCompleted) repository.updateSubTaskCompletion(sub.id, true)
+            }
+        } else {
+            subtasks.forEach { sub ->
+                if (sub.isCompleted) repository.updateSubTaskCompletion(sub.id, false)
             }
         }
     }

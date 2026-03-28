@@ -72,8 +72,7 @@ fun TaskifyNavGraph(
         ) { backStackEntry ->
             TaskDetailScreen(
                 taskId = backStackEntry.arguments?.getString("taskId") ?: "",
-                onNavigateBack = { navController.popBackStack() },
-                onNavigateToEdit = { navController.navigate(Screen.EditTask.createRoute(it)) }
+                onNavigateBack = { navController.popBackStack() }
             )
         }
 

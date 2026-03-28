@@ -9,24 +9,29 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.taskify.app.domain.model.SortOrder
 import com.taskify.app.ui.theme.ThemeMode
 import com.taskify.app.ui.theme.ThemeViewModel
-import com.taskify.app.util.AppPreferences
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
-    themeViewModel: ThemeViewModel
+    themeViewModel: ThemeViewModel,
+    settingsViewModel: SettingsViewModel = hiltViewModel()
 ) {
-    val context = LocalContext.current
-    val prefs = remember { AppPreferences(context) }
+    val prefs = settingsViewModel.prefs
     var notificationsEnabled by remember { mutableStateOf(prefs.notificationsEnabled) }
     var defaultPriority by remember { mutableStateOf(prefs.defaultPriority) }
+    var defaultSort by remember {
+        mutableStateOf(
+            runCatching { SortOrder.valueOf(prefs.lastSortOrder) }
+                .getOrDefault(SortOrder.CREATED_DATE_DESC)
+        )
+    }
     val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -104,22 +109,73 @@ fun SettingsScreen(
             // ── Tasks ──────────────────────────────────────────────────────
             item { SettingsSectionHeader("Tasks") }
 
+            // Default priority — segmented control (Low / Medium / High)
             item {
-                ListItem(
-                    headlineContent = { Text("Default priority") },
-                    supportingContent = { Text(defaultPriority) },
-                    leadingContent = { Icon(Icons.Filled.Flag, null) },
-                    trailingContent = {
-                        TextButton(onClick = {
-                            defaultPriority = when (defaultPriority) {
-                                "LOW" -> "MEDIUM"
-                                "MEDIUM" -> "HIGH"
-                                else -> "LOW"
-                            }
-                            prefs.defaultPriority = defaultPriority
-                        }) { Text(defaultPriority) }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Flag, null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text("Default priority", style = MaterialTheme.typography.bodyMedium)
                     }
-                )
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        listOf("LOW" to "Low", "MEDIUM" to "Medium", "HIGH" to "High")
+                            .forEachIndexed { index, (value, label) ->
+                                SegmentedButton(
+                                    selected = defaultPriority == value,
+                                    onClick = {
+                                        defaultPriority = value
+                                        prefs.defaultPriority = value
+                                    },
+                                    shape = SegmentedButtonDefaults.itemShape(index, 3)
+                                ) { Text(label) }
+                            }
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(4.dp)) }
+
+            // Default sort order — 4 rows of 2-option segmented controls
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.SwapVert, null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text("Default sort order", style = MaterialTheme.typography.bodyMedium)
+                    }
+
+                    SortOrderPicker(
+                        selected = defaultSort,
+                        onSelect = {
+                            defaultSort = it
+                            prefs.lastSortOrder = it.name
+                        }
+                    )
+                }
             }
 
             item { HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
@@ -134,6 +190,50 @@ fun SettingsScreen(
         }
     }
 }
+
+// ── Sort order picker ─────────────────────────────────────────────────────────
+// Four groups, each with 2 segmented buttons. Selecting any option immediately
+// updates the in-memory state, the prefs, and (via sortOrderFlow) the task list.
+
+@Composable
+private fun SortOrderPicker(selected: SortOrder, onSelect: (SortOrder) -> Unit) {
+    val groups = listOf(
+        "Due Date"     to listOf(SortOrder.DUE_DATE_ASC     to "Earliest", SortOrder.DUE_DATE_DESC     to "Latest"),
+        "Priority"     to listOf(SortOrder.PRIORITY_DESC    to "High → Low", SortOrder.PRIORITY_ASC    to "Low → High"),
+        "Date Created" to listOf(SortOrder.CREATED_DATE_DESC to "Newest",   SortOrder.CREATED_DATE_ASC  to "Oldest"),
+        "Title"        to listOf(SortOrder.TITLE_ASC         to "A → Z",    SortOrder.TITLE_DESC         to "Z → A")
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        groups.forEach { (groupLabel, options) ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    groupLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(72.dp)
+                )
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
+                    options.forEachIndexed { index, (sort, label) ->
+                        SegmentedButton(
+                            selected = selected == sort,
+                            onClick = { onSelect(sort) },
+                            shape = SegmentedButtonDefaults.itemShape(index, 2)
+                        ) {
+                            Text(label, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Shared composables / extensions ──────────────────────────────────────────
 
 @Composable
 private fun ThemeSegmentedControl(
@@ -158,9 +258,7 @@ private fun ThemeSegmentedControl(
                         modifier = Modifier.size(16.dp)
                     )
                 }
-            ) {
-                Text(mode.label)
-            }
+            ) { Text(mode.label) }
         }
     }
 }
@@ -175,7 +273,6 @@ private fun SettingsSectionHeader(title: String) {
     )
 }
 
-// Short label used in the segmented control buttons
 private val ThemeMode.label: String
     get() = when (this) {
         ThemeMode.SYSTEM -> "System"
@@ -183,7 +280,6 @@ private val ThemeMode.label: String
         ThemeMode.DARK   -> "Dark"
     }
 
-// Full label used in the list item description
 private val ThemeMode.fullLabel: String
     get() = when (this) {
         ThemeMode.SYSTEM -> "System default"

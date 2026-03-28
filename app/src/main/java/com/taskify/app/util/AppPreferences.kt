@@ -3,6 +3,9 @@ package com.taskify.app.util
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Lightweight SharedPreferences wrapper for user settings.
@@ -21,9 +24,19 @@ class AppPreferences(context: Context) {
         get() = prefs.getString(KEY_DEFAULT_PRIORITY, "MEDIUM") ?: "MEDIUM"
         set(value) = prefs.edit { putString(KEY_DEFAULT_PRIORITY, value) }
 
+    // Backed by a StateFlow so that ViewModels can react immediately when
+    // Settings changes this value — no app restart needed.
+    private val _sortOrderFlow = MutableStateFlow(
+        prefs.getString(KEY_SORT_ORDER, "CREATED_DATE_DESC") ?: "CREATED_DATE_DESC"
+    )
+    val sortOrderFlow: StateFlow<String> = _sortOrderFlow.asStateFlow()
+
     var lastSortOrder: String
-        get() = prefs.getString(KEY_SORT_ORDER, "CREATED_DATE") ?: "CREATED_DATE"
-        set(value) = prefs.edit { putString(KEY_SORT_ORDER, value) }
+        get() = prefs.getString(KEY_SORT_ORDER, "CREATED_DATE_DESC") ?: "CREATED_DATE_DESC"
+        set(value) {
+            prefs.edit { putString(KEY_SORT_ORDER, value) }
+            _sortOrderFlow.value = value
+        }
 
     var themeMode: String
         get() = prefs.getString(KEY_THEME, "SYSTEM") ?: "SYSTEM"

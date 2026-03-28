@@ -21,6 +21,7 @@ data class AddEditUiState(
     val dueDate: LocalDateTime? = LocalDateTime.now().withHour(9).withMinute(0).withSecond(0).withNano(0),
     val recurrence: Recurrence = Recurrence.None,
     val tags: List<Tag> = emptyList(),
+    val pendingSubTasks: List<SubTask> = emptyList(),
     val isEditMode: Boolean = false,
     val isSaving: Boolean = false,
     val titleError: String? = null,
@@ -87,6 +88,22 @@ class AddEditTaskViewModel @Inject constructor(
         _uiState.update { it.copy(recurrence = recurrence) }
     }
 
+    fun stageSubTask(title: String) {
+        if (title.isBlank()) return
+        val draft = SubTask(
+            id = UUID.randomUUID().toString(),
+            taskId = _uiState.value.taskId,
+            title = title.trim(),
+            createdAt = LocalDateTime.now(),
+            position = _uiState.value.pendingSubTasks.size
+        )
+        _uiState.update { it.copy(pendingSubTasks = it.pendingSubTasks + draft) }
+    }
+
+    fun removePendingSubTask(id: String) {
+        _uiState.update { it.copy(pendingSubTasks = it.pendingSubTasks.filter { s -> s.id != id }) }
+    }
+
     fun saveTask() {
         val state = _uiState.value
         if (state.title.isBlank()) {
@@ -112,7 +129,10 @@ class AddEditTaskViewModel @Inject constructor(
 
             val result = upsertTaskUseCase(task)
             if (result.isSuccess) {
-                // Schedule / update alarm if due date is set
+                // Save any subtasks that were staged during creation/editing.
+                // Task must exist in DB before subtasks due to FK constraint.
+                state.pendingSubTasks.forEach { repository.upsertSubTask(it) }
+
                 state.dueDate?.let { dueDate ->
                     alarmScheduler.scheduleTaskReminder(task.id, task.title, dueDate)
                 }

@@ -3,10 +3,14 @@ package com.taskify.app.ui.screens.addedittask
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,6 +20,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.taskify.app.domain.model.Priority
 import com.taskify.app.domain.model.Recurrence
+import com.taskify.app.domain.model.SubTask
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -65,6 +71,7 @@ fun AddEditTaskScreen(
             modifier = Modifier
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
+                .imePadding()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -76,7 +83,10 @@ fun AddEditTaskScreen(
                 isError = uiState.titleError != null,
                 supportingText = uiState.titleError?.let { { Text(it) } },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences
+                )
             )
 
             // Description
@@ -86,7 +96,10 @@ fun AddEditTaskScreen(
                 label = { Text("Description (optional)") },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3,
-                maxLines = 5
+                maxLines = 5,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences
+                )
             )
 
             // Priority selector
@@ -106,6 +119,84 @@ fun AddEditTaskScreen(
                 selected = uiState.recurrence,
                 onRecurrenceSelected = viewModel::onRecurrenceChange
             )
+
+            // Subtasks
+            SubtasksSection(
+                pendingSubTasks = uiState.pendingSubTasks,
+                onStageSubTask = viewModel::stageSubTask,
+                onRemoveSubTask = viewModel::removePendingSubTask
+            )
+        }
+    }
+}
+
+@Composable
+private fun SubtasksSection(
+    pendingSubTasks: List<SubTask>,
+    onStageSubTask: (String) -> Unit,
+    onRemoveSubTask: (String) -> Unit
+) {
+    var text by remember { mutableStateOf("") }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Subtasks", style = MaterialTheme.typography.labelLarge)
+
+        // Staged subtask list
+        pendingSubTasks.forEach { sub ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Schedule, null,
+                    modifier = Modifier.size(18.dp).padding(2.dp),
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                )
+                Text(
+                    text = sub.title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+                IconButton(
+                    onClick = { onRemoveSubTask(sub.id) },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Close, "Remove",
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    )
+                }
+            }
+        }
+
+        // Input row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = { Text("Add a subtask...") },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences
+                )
+            )
+            FilledTonalIconButton(
+                onClick = {
+                    onStageSubTask(text)
+                    text = ""
+                },
+                enabled = text.isNotBlank()
+            ) {
+                Icon(Icons.Filled.Add, "Add subtask", modifier = Modifier.size(18.dp))
+            }
         }
     }
 }

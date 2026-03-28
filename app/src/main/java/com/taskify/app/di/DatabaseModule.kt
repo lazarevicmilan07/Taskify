@@ -6,6 +6,7 @@ import com.taskify.app.data.local.TaskifyDatabase
 import com.taskify.app.data.local.dao.SubTaskDao
 import com.taskify.app.data.local.dao.TagDao
 import com.taskify.app.data.local.dao.TaskDao
+import com.taskify.app.util.AppPreferences
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -33,4 +34,9 @@ object DatabaseModule {
 
     @Provides
     fun provideTagDao(db: TaskifyDatabase): TagDao = db.tagDao()
+
+    @Provides
+    @Singleton
+    fun provideAppPreferences(@ApplicationContext context: Context): AppPreferences =
+        AppPreferences(context)
 }

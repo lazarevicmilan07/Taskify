@@ -7,6 +7,7 @@ import com.taskify.app.domain.usecase.task.DeleteTaskUseCase
 import com.taskify.app.domain.usecase.task.GetTasksUseCase
 import com.taskify.app.domain.usecase.task.SearchTasksUseCase
 import com.taskify.app.domain.usecase.task.ToggleTaskCompletionUseCase
+import com.taskify.app.util.AppPreferences
 import com.taskify.app.worker.TaskAlarmScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -25,13 +26,6 @@ data class TaskListUiState(
     val snackbarMessage: String? = null
 )
 
-/**
- * ViewModel for the task list screen.
- *
- * Key pattern: flatMapLatest on filter/sort StateFlows means whenever
- * the user switches tabs or sort order, the old Flow is automatically
- * cancelled and a new DB query starts. No manual unsubscribe needed.
- */
 @HiltViewModel
 class TaskListViewModel @Inject constructor(
     private val getTasksUseCase: GetTasksUseCase,
@@ -39,20 +33,36 @@ class TaskListViewModel @Inject constructor(
     private val deleteTaskUseCase: DeleteTaskUseCase,
     private val searchTasksUseCase: SearchTasksUseCase,
     private val alarmScheduler: TaskAlarmScheduler,
-    private val repository: TaskRepository
+    private val repository: TaskRepository,
+    private val appPreferences: AppPreferences
 ) : ViewModel() {
 
     private val _activeFilter = MutableStateFlow(TaskFilter.ALL)
-    private val _sortOrder = MutableStateFlow(SortOrder.CREATED_DATE_DESC)
+    // Initialised from the saved default. Settings changes update this immediately
+    // via the init collector; manual in-list changes are session-only (not persisted).
+    private val _sortOrder = MutableStateFlow(
+        runCatching { SortOrder.valueOf(appPreferences.lastSortOrder) }
+            .getOrDefault(SortOrder.CREATED_DATE_DESC)
+    )
     private val _searchQuery = MutableStateFlow("")
     private val _isSearchActive = MutableStateFlow(false)
     private val _snackbarMessage = MutableStateFlow<String?>(null)
 
-    // Holds a recently deleted task for undo support
     private var recentlyDeletedTask: Task? = null
 
+    init {
+        // When the user changes the default sort in Settings, propagate it to the
+        // task list immediately — but only Settings writes to appPreferences, so
+        // manual in-list sort changes never bleed into the Settings default.
+        viewModelScope.launch {
+            appPreferences.sortOrderFlow
+                .map { name -> runCatching { SortOrder.valueOf(name) }.getOrDefault(SortOrder.CREATED_DATE_DESC) }
+                .collect { _sortOrder.value = it }
+        }
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
-    val uiState: StateFlow<TaskListUiState> = combine(
+    private val filteredTasksFlow: Flow<List<Task>> = combine(
         _activeFilter,
         _sortOrder,
         _isSearchActive
@@ -60,9 +70,6 @@ class TaskListViewModel @Inject constructor(
         Triple(filter, sort, isSearchActive)
     }.flatMapLatest { (filter, sort, isSearchActive) ->
         if (isSearchActive) {
-            // Show current tasks immediately when query is empty.
-            // When typing, wait 300ms after the last keystroke before querying
-            // (flatMapLatest auto-cancels the delay if a new character arrives).
             _searchQuery.flatMapLatest { query ->
                 if (query.isBlank()) {
                     getTasksUseCase(filter, sort)
@@ -76,13 +83,21 @@ class TaskListViewModel @Inject constructor(
         } else {
             getTasksUseCase(filter, sort)
         }
-    }.combine(_snackbarMessage) { tasks, message ->
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val uiState: StateFlow<TaskListUiState> = combine(
+        filteredTasksFlow,
+        _searchQuery,
+        _snackbarMessage,
+        _sortOrder
+    ) { tasks, query, message, sort ->
         TaskListUiState(
             tasks = tasks,
             isLoading = false,
             activeFilter = _activeFilter.value,
-            sortOrder = _sortOrder.value,
-            searchQuery = _searchQuery.value,
+            sortOrder = sort,
+            searchQuery = query,
             isSearchActive = _isSearchActive.value,
             snackbarMessage = message
         )
@@ -93,7 +108,12 @@ class TaskListViewModel @Inject constructor(
     )
 
     fun setFilter(filter: TaskFilter) { _activeFilter.value = filter }
-    fun setSortOrder(sort: SortOrder) { _sortOrder.value = sort }
+
+    // Session-only: updates the local StateFlow but does NOT persist to prefs,
+    // so the Settings default sort is never affected by manual in-list sorting.
+    fun setSortOrder(sort: SortOrder) {
+        _sortOrder.value = sort
+    }
 
     fun setSearchActive(active: Boolean) {
         _isSearchActive.value = active
@@ -103,37 +123,34 @@ class TaskListViewModel @Inject constructor(
     fun onSearchQueryChange(query: String) { _searchQuery.value = query }
 
     fun toggleTaskCompletion(taskId: String, isCompleted: Boolean) {
-        viewModelScope.launch {
-            toggleCompletionUseCase(taskId, isCompleted)
-        }
+        viewModelScope.launch { toggleCompletionUseCase(taskId, isCompleted) }
     }
 
-    fun toggleSubTaskCompletion(subTaskId: String, isCompleted: Boolean) {
+    fun toggleSubTaskCompletion(taskId: String, subTaskId: String, isCompleted: Boolean) {
         viewModelScope.launch {
             repository.updateSubTaskCompletion(subTaskId, isCompleted)
+            val task = repository.observeTask(taskId).firstOrNull() ?: return@launch
+            if (isCompleted) {
+                if (!task.isCompleted && task.subtasks.isNotEmpty() && task.subtasks.all { it.isCompleted }) {
+                    repository.updateCompletionStatus(taskId, true)
+                }
+            } else {
+                if (task.isCompleted) repository.updateCompletionStatus(taskId, false)
+            }
         }
     }
 
     fun deleteTask(task: Task) {
         viewModelScope.launch {
             recentlyDeletedTask = task
-            // Cancel any pending reminder
-            task.dueDate?.let {
-                alarmScheduler.cancelTaskReminder(task.id, task.title)
-            }
+            task.dueDate?.let { alarmScheduler.cancelTaskReminder(task.id, task.title) }
             deleteTaskUseCase(task.id)
             _snackbarMessage.value = "Task deleted"
         }
     }
 
     fun undoDelete() {
-        val task = recentlyDeletedTask ?: return
-        viewModelScope.launch {
-            // Re-insert the task (upsert handles this)
-            // Use case injection not needed here — repository.upsertTask via ViewModel
-            // is acceptable since it's a UI-triggered undo
-            _snackbarMessage.value = null
-        }
+        viewModelScope.launch { _snackbarMessage.value = null }
     }
 
     fun dismissSnackbar() { _snackbarMessage.value = null }
