@@ -210,4 +210,20 @@ class TaskDetailViewModel @Inject constructor(
     fun deleteSubTask(subTaskId: String) {
         viewModelScope.launch { repository.deleteSubTask(subTaskId) }
     }
+
+    fun updateSubTaskTitle(id: String, newTitle: String) {
+        if (newTitle.isBlank()) return
+        val sub = uiState.value.task?.subtasks?.firstOrNull { it.id == id } ?: return
+        viewModelScope.launch {
+            repository.upsertSubTask(sub.copy(title = newTitle.trim()))
+        }
+    }
+
+    fun onSubTasksReordered(subtasks: List<SubTask>) {
+        viewModelScope.launch {
+            subtasks.forEachIndexed { index, sub ->
+                repository.upsertSubTask(sub.copy(position = index))
+            }
+        }
+    }
 }

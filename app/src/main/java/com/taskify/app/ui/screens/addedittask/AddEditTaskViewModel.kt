@@ -22,6 +22,7 @@ data class AddEditUiState(
     val recurrence: Recurrence = Recurrence.None,
     val tags: List<Tag> = emptyList(),
     val pendingSubTasks: List<SubTask> = emptyList(),
+    val deletedSubTaskIds: List<String> = emptyList(),
     val isEditMode: Boolean = false,
     val isSaving: Boolean = false,
     val titleError: String? = null,
@@ -61,6 +62,7 @@ class AddEditTaskViewModel @Inject constructor(
                         dueDate = task.dueDate,
                         recurrence = task.recurrence,
                         tags = task.tags,
+                        pendingSubTasks = task.subtasks.sortedBy { it.position },
                         isEditMode = true
                     )
                 }
@@ -101,7 +103,31 @@ class AddEditTaskViewModel @Inject constructor(
     }
 
     fun removePendingSubTask(id: String) {
-        _uiState.update { it.copy(pendingSubTasks = it.pendingSubTasks.filter { s -> s.id != id }) }
+        _uiState.update { state ->
+            state.copy(
+                pendingSubTasks = state.pendingSubTasks.filter { it.id != id },
+                deletedSubTaskIds = state.deletedSubTaskIds + id
+            )
+        }
+    }
+
+    fun updateSubTaskTitle(id: String, newTitle: String) {
+        if (newTitle.isBlank()) return
+        _uiState.update { state ->
+            state.copy(
+                pendingSubTasks = state.pendingSubTasks.map { sub ->
+                    if (sub.id == id) sub.copy(title = newTitle.trim()) else sub
+                }
+            )
+        }
+    }
+
+    fun onSubTasksReordered(subtasks: List<SubTask>) {
+        _uiState.update { state ->
+            state.copy(
+                pendingSubTasks = subtasks.mapIndexed { i, sub -> sub.copy(position = i) }
+            )
+        }
     }
 
     fun saveTask() {
@@ -129,8 +155,9 @@ class AddEditTaskViewModel @Inject constructor(
 
             val result = upsertTaskUseCase(task)
             if (result.isSuccess) {
-                // Save any subtasks that were staged during creation/editing.
-                // Task must exist in DB before subtasks due to FK constraint.
+                // Delete subtasks removed during editing (no-op for new tasks)
+                state.deletedSubTaskIds.forEach { repository.deleteSubTask(it) }
+                // Upsert all remaining subtasks (handles both new and edited)
                 state.pendingSubTasks.forEach { repository.upsertSubTask(it) }
 
                 state.dueDate?.let { dueDate ->
